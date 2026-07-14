@@ -1,46 +1,48 @@
 package one.yufz.hmspush.hook.hms
 
-import android.app.AndroidAppHelper
 import android.content.Context
-import one.yufz.hmspush.common.HMSPUSH_PREF_NAME
-import one.yufz.hmspush.common.PREF_KEY_DISABLE_SIGNATURE
-import one.yufz.hmspush.common.content.storeToSharedPreference
-import one.yufz.hmspush.common.content.toContent
-import one.yufz.hmspush.common.model.PrefsModel
+import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.XposedAPI
 
 object Prefs {
-    private val pref = AndroidAppHelper.currentApplication().getSharedPreferences(HMSPUSH_PREF_NAME, Context.MODE_PRIVATE)
+    private const val TAG = "Prefs"
+    private const val HMSPUSH_PREF_NAME = "HMSPush"
 
-    var prefModel: PrefsModel
-        private set
-
-    init {
-        prefModel = pref.toContent()
-        migrateLegacyPreference()
+    private val pref by lazy {
+        getCurrentApplication().getSharedPreferences(HMSPUSH_PREF_NAME, Context.MODE_PRIVATE)
     }
 
-    private fun migrateLegacyPreference() {
-        if (pref.contains(PREF_KEY_DISABLE_SIGNATURE)) {
-            updatePreference(
-                prefModel.copy(disableSignature = pref.getBoolean(PREF_KEY_DISABLE_SIGNATURE, false))
-            )
-            pref.edit()
-                .remove(PREF_KEY_DISABLE_SIGNATURE)
-                .apply()
-        }
-    }
+    val signCheckEnabled: Boolean
+        get() = pref.getBoolean("sign_check", true)
 
-    fun updatePreference(prefsModel: PrefsModel) {
-        this.prefModel = prefsModel.also { model ->
-            pref.edit()
-                .also { model.storeToSharedPreference(it) }
-                .apply()
-        }
+    val notificationStyle: Int
+        get() = pref.getInt("notification_style", 1)
 
-    }
+    val notificationColor: Int
+        get() = pref.getInt("notification_color", 0)
 
-    fun isDisableSignature(): Boolean {
-        return prefModel.disableSignature
-    }
+    val avatarRadius: Int
+        get() = pref.getInt("avatar_radius", 0)
 
+    val isDisableSignature: Boolean
+        get() = pref.getBoolean("disable_signature", false)
+
+    val useSelfNotificationManager: Boolean
+        get() = pref.getBoolean("self_notification_manager", false)
+
+    val iconColor: Int
+        get() = pref.getInt("icon_color", 0)
+
+    val isEnableLegacyPushService: Boolean
+        get() = pref.getBoolean("enable_legacy_push_service", false)
+
+    val prefModel: one.yufz.hmspush.common.model.PrefsModel
+        get() = one.yufz.hmspush.common.model.PrefsModel(
+            disableSignature = isDisableSignature,
+            groupMessageById = pref.getBoolean("group_message_by_id", true),
+            useCustomIcon = pref.getBoolean("use_custom_icon", false),
+            tintIconColor = pref.getBoolean("tint_icon_color", true),
+        )
+
+    private fun getCurrentApplication(): android.app.Application = XposedAPI.currentApplication()
 }

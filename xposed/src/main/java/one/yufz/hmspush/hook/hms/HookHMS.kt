@@ -1,17 +1,16 @@
 package one.yufz.hmspush.hook.hms
 
-import de.robv.android.xposed.callbacks.XC_LoadPackage
-import one.yufz.xposed.*
+import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.findClass
 
 class HookHMS {
     companion object {
         private const val TAG = "HookHMS"
     }
 
-    fun hook(lpparam: XC_LoadPackage.LoadPackageParam) {
-        if (HookPushNC.canHook(lpparam.classLoader)) {
-            HookPushNC.hook(lpparam.classLoader)
+    fun hook(classLoader: ClassLoader) {
+        if (HookPushNC.canHook(classLoader)) {
+            HookPushNC.hook(classLoader)
         }
     }
-
 }

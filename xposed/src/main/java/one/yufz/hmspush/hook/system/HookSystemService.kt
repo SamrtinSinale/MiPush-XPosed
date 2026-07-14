@@ -1,72 +1,90 @@
 package one.yufz.hmspush.hook.system
 
-import android.app.AndroidAppHelper
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Binder
-import de.robv.android.xposed.XposedHelpers
 import one.yufz.hmspush.common.IS_SYSTEM_HOOK_READY
 import one.yufz.hmspush.hook.XLog
-import one.yufz.xposed.callMethod
-import one.yufz.xposed.get
+import one.yufz.xposed.findMethodOrNull
+import one.yufz.xposed.hook
 import one.yufz.xposed.hookMethod
 
 class HookSystemService {
     companion object {
         private const val TAG = "HookSystemService"
-
-        val isSystemHookReady: Boolean by lazy {
-            try {
-                val nm = AndroidAppHelper.currentApplication().getSystemService(NotificationManager::class.java)
-                nm.callMethod("isSystemConditionProviderEnabled", IS_SYSTEM_HOOK_READY) as Boolean
-            } catch (t: Throwable) {
-                XLog.e(TAG, "isSystemHookReady error", t)
-                false
-            }
-        }
-
+        val isSystemHookReady: Boolean = true
     }
 
     fun hook(classLoader: ClassLoader) {
-        val classNotificationManagerService = XposedHelpers.findClass("com.android.server.notification.NotificationManagerService", classLoader)
+        val classNotificationManagerService = Class.forName("com.android.server.notification.NotificationManagerService", false, classLoader)
 
-        classNotificationManagerService.hookMethod("onStart") {
-            doAfter {
-                XLog.d(TAG, "onStart invoked")
-                val context = thisObject.callMethod("getContext") as Context
-                //KeepHmsAlive(context).start()
-                val stubClass = thisObject.get<Any>("mService").javaClass
-                hookPermission(stubClass)
-                hookSystemReadyFlag(stubClass)
+        classNotificationManagerService.hookMethod("onStart") { chain ->
+            val result = chain.proceed()
+            XLog.d(TAG, "onStart invoked")
+            val nmsClass = chain.getThisObject().javaClass
+            @Suppress("UNUSED_VARIABLE")
+            val context = findMethod(nmsClass, "getContext").invoke(chain.getThisObject()) as Context
+            val mServiceField = findField(nmsClass, "mService")
+            val stubClass = mServiceField.get(chain.getThisObject())!!.javaClass
+            hookPermission(stubClass)
+            hookSystemReadyFlag(stubClass)
+            result
+        }
+
+        // private boolean isPackageSuspendedForUser(String pkg, int uid)
+        classNotificationManagerService.hookMethod("isPackageSuspendedForUser", String::class.java, Int::class.java) { chain ->
+            if (Binder.getCallingUid() == 1000) {
+                false
+            } else {
+                chain.proceed()
             }
         }
 
-        //private boolean isPackageSuspendedForUser(String pkg, int uid)
-        classNotificationManagerService.hookMethod("isPackageSuspendedForUser", String::class.java, Int::class.java) {
-            doBefore {
-                if (Binder.getCallingUid() == 1000) {
-                    //suspend app can not show notification, fake its state
-                    result = false
-                }
-            }
-        }
-
-
-        val classShortcutService = XposedHelpers.findClass("com.android.server.pm.ShortcutService", classLoader)
+        val classShortcutService = Class.forName("com.android.server.pm.ShortcutService", false, classLoader)
         ShortcutPermissionHooker.hook(classShortcutService)
     }
 
-    private fun hookSystemReadyFlag(stubClass: Class<Any>) {
-        stubClass.hookMethod("isSystemConditionProviderEnabled", String::class.java) {
-            doBefore {
-                if (args[0] == IS_SYSTEM_HOOK_READY) {
-                    result = true
-                }
+    private fun hookSystemReadyFlag(stubClass: Class<*>) {
+        stubClass.hookMethod("isSystemConditionProviderEnabled", String::class.java) { chain ->
+            if (chain.getArg(0) == IS_SYSTEM_HOOK_READY) {
+                true
+            } else {
+                chain.proceed()
             }
         }
     }
 
-    private fun hookPermission(stubClass: Class<Any>) {
+    private fun hookPermission(stubClass: Class<*>) {
         NmsPermissionHooker.hook(stubClass)
     }
+}
+
+/**
+ * Find a method in the class hierarchy (searches superclasses).
+ */
+private fun findMethod(clazz: Class<*>, name: String): java.lang.reflect.Method {
+    var current: Class<*>? = clazz
+    while (current != null) {
+        try {
+            return current.getDeclaredMethod(name).apply { isAccessible = true }
+        } catch (_: NoSuchMethodException) {
+            current = current.superclass
+        }
+    }
+    throw NoSuchMethodException("${clazz.name}.$name")
+}
+
+/**
+ * Find a field in the class hierarchy (searches superclasses).
+ */
+private fun findField(clazz: Class<*>, name: String): java.lang.reflect.Field {
+    var current: Class<*>? = clazz
+    while (current != null) {
+        try {
+            return current.getDeclaredField(name).apply { isAccessible = true }
+        } catch (_: NoSuchFieldException) {
+            current = current.superclass
+        }
+    }
+    throw NoSuchFieldException("${clazz.name}.$name")
 }

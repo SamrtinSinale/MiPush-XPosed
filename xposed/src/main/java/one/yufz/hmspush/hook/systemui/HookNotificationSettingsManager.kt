@@ -1,6 +1,5 @@
 package one.yufz.hmspush.hook.systemui
 
-import de.robv.android.xposed.XposedHelpers
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.hook
 
@@ -12,31 +11,19 @@ class HookNotificationSettingsManager : ISystemUIPluginHooker {
     override fun hook(pluginLoader: ClassLoader) {
         try {
             XLog.d(TAG, "hook start")
-            val classNotificationSettingsManager = XposedHelpers.findClass(
+            val classNotificationSettingsManager = Class.forName(
                 "miui.systemui.notification.NotificationSettingsManager",
-                pluginLoader
+                false, pluginLoader
             )
 
             XLog.d(TAG, "hook method")
             classNotificationSettingsManager.declaredMethods.find { it.name == "canCustomFocus" }!!
-                .hook {
-                    replace {
-                        true
-                    }
-                }
+                .hook { _ -> true }
             classNotificationSettingsManager.declaredMethods.find { it.name == "canShowFocus" }!!
-                .hook {
-                    replace {
-                        true
-                    }
-                }
+                .hook { _ -> true }
             XLog.d(TAG, "hook end")
         } catch (e: Throwable) {
-            XLog.e(
-                TAG,
-                "hook NotificationSettingsManager failure: " + e.message,
-                e
-            )
+            XLog.e(TAG, "hook NotificationSettingsManager failure: " + e.message, e)
         }
     }
 }

@@ -1,27 +1,31 @@
 package one.yufz.hmspush.hook.fakedevice
 
-import de.robv.android.xposed.callbacks.XC_LoadPackage
+import one.yufz.hmspush.hook.IFakeParam
 import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.findClass
 import one.yufz.xposed.hookMethod
-import miui.external.SdkHelper
 
 open class Common : IFakeDevice {
     companion object {
         private const val TAG = "Common"
     }
 
-    override fun fake(lpparam: XC_LoadPackage.LoadPackageParam): Boolean {
-        XLog.d(TAG, "fake() called with: packageName = ${lpparam.packageName}")
+    override fun fake(param: IFakeParam): Boolean {
+        XLog.d(TAG, "fake() called with: packageName = ${param.packageName}")
         fakeAllBuildInProperties()
-        fakeClass(lpparam)
+        fakeClass(param)
         return true
     }
 
-    private fun fakeClass(lpparam: XC_LoadPackage.LoadPackageParam) {
+    private fun fakeClass(param: IFakeParam) {
+        val classLoader = when (param) {
+            is one.yufz.hmspush.hook.FakeDeviceParam -> param.classLoader
+            else -> return
+        }
+
         var isMIUI = false
         try {
-            // check MIUI environment
-            Class.forName("miui.os.Build", false, lpparam.classLoader)
+            Class.forName("miui.os.Build", false, classLoader)
             isMIUI = true
         } catch (_: Throwable) {
         }
@@ -31,23 +35,22 @@ open class Common : IFakeDevice {
 
         val classMap: Map<String, Class<out Any>> = mapOf(
             "miui.os.Build" to Object::class.java,
-            SdkHelper::class.java.name to SdkHelper::class.java,
+            "miui.external.SdkHelper" to Object::class.java,
         )
         Class::class.java.hookMethod(
             "forName",
             String::class.java,
             Boolean::class.java,
             ClassLoader::class.java
-        ) {
-            doBefore {
-                var requestClass = args[0]
-                val returnClass = classMap[requestClass]
-                if (returnClass != null) {
-                    XLog.d(TAG, "forHook $requestClass")
-                    result = returnClass
-                } else {
-                    XLog.t(TAG, "forName $requestClass")
-                }
+        ) { chain ->
+            val requestClass = chain.getArg(0) as String
+            val returnClass = classMap[requestClass]
+            if (returnClass != null) {
+                XLog.d(TAG, "forHook $requestClass")
+                returnClass
+            } else {
+                XLog.t(TAG, "forName $requestClass")
+                chain.proceed()
             }
         }
     }

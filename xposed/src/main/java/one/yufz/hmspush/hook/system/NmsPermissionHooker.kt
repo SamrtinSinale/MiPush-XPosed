@@ -1,22 +1,18 @@
 package one.yufz.hmspush.hook.system
 
-import android.app.AndroidAppHelper
 import android.app.Notification
 import android.app.NotificationChannelGroup
 import android.content.Context
 import android.os.Binder
 import android.os.Build
 import android.os.Process
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedHelpers.findClass
-import de.robv.android.xposed.XposedHelpers.findMethodExact
 import one.yufz.hmspush.common.ANDROID_PACKAGE_NAME
 import one.yufz.hmspush.common.HMS_PACKAGE_NAME
 import one.yufz.hmspush.hook.XLog
-import one.yufz.xposed.HookCallback
-import one.yufz.xposed.HookContext
+import one.yufz.xposed.XposedAPI
+import one.yufz.xposed.findMethodOrNull
 import one.yufz.xposed.hook
-import one.yufz.xposed.hookMethod
+import java.lang.reflect.Method
 
 object NmsPermissionHooker {
     private const val TAG = "NmsPermissionHooker"
@@ -27,129 +23,136 @@ object NmsPermissionHooker {
         false
     }
 
-    private fun getPackageUid(packageName: String) = getContext().packageManager.getPackageUid(packageName, 0)
+    private fun getPackageUid(packageName: String): Int = XposedAPI.getPackageUid(packageName)
 
-    private fun getContext(): Context = AndroidAppHelper.currentApplication()
-
-    private fun tryHookPermission(packageName: String): Boolean {
-        if (fromHms()) {
-            Binder.clearCallingIdentity()
-            return true
-        }
-        return false
-    }
-
-    private fun hookPermission(targetPackageNameParamIndex: Int, hookExtra: (XC_MethodHook.MethodHookParam.() -> Unit)? = null): HookCallback = {
-        doBefore {
-            if (tryHookPermission(args[targetPackageNameParamIndex] as String)) {
-                hookExtra?.invoke(this)
-            }
-        }
-    }
+    private fun getContext(): Context = XposedAPI.currentApplication()
 
     fun hook(classINotificationManager: Class<*>) {
-        //boolean areNotificationsEnabledForPackage(String pkg, int uid);
+        // boolean areNotificationsEnabledForPackage(String pkg, int uid);
         findMethodExact(classINotificationManager, "areNotificationsEnabledForPackage", String::class.java, Int::class.java)
-            .hook(hookPermission(0))
+            ?.hook { chain ->
+                doHookPermission(chain, 0, null)
+            }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            //NotificationChannel getNotificationChannelForPackage(String pkg, int uid, String channelId, String conversationId, boolean includeDeleted);
             findMethodExact(classINotificationManager, "getNotificationChannelForPackage", String::class.java, Int::class.java, String::class.java, String::class.java, Boolean::class.java)
-                .hook(hookPermission(0))
+                ?.hook { chain -> doHookPermission(chain, 0, null) }
         } else {
-            //NotificationChannel getNotificationChannelForPackage(String pkg, int uid, String channelId, boolean includeDeleted);
             findMethodExact(classINotificationManager, "getNotificationChannelForPackage", String::class.java, Int::class.java, String::class.java, Boolean::class.java)
-                .hook(hookPermission(0))
+                ?.hook { chain -> doHookPermission(chain, 0, null) }
         }
 
-        //ParceledListSlice getNotificationChannelsForPackage(String pkg, int uid, boolean includeDeleted);
         findMethodExact(classINotificationManager, "getNotificationChannelsForPackage", String::class.java, Int::class.java, Boolean::class.java)
-            .hook(hookPermission(0))
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
 
-        //void enqueueNotificationWithTag(String pkg, String opPkg, String tag, int id, Notification notification, int userId)
         findMethodExact(classINotificationManager, "enqueueNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Notification::class.java, Int::class.java)
-            .hook(hookPermission(0) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    args[1] = ANDROID_PACKAGE_NAME
-                }
-            })
-
-        //void createNotificationChannelsForPackage(String pkg, int uid, in ParceledListSlice channelsList);
-        findMethodExact(classINotificationManager, "createNotificationChannelsForPackage", String::class.java, Int::class.java, findClass("android.content.pm.ParceledListSlice", null))
-            .hook(hookPermission(0))
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            //void cancelNotificationWithTag(String pkg, String opPkg, String tag, int id, int userId);
-            findMethodExact(classINotificationManager, "cancelNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Int::class.java)
-                .hook(hookPermission(0) {
-                    args[1] = ANDROID_PACKAGE_NAME
-                })
-        } else {
-            //void cancelNotificationWithTag(String pkg, String opPkg, String tag, int id, int userId);
-            findMethodExact(classINotificationManager, "cancelNotificationWithTag", String::class.java, String::class.java, Int::class.java, Int::class.java)
-                .hook(hookPermission(0))
-        }
-
-        //void deleteNotificationChannel(String pkg, String channelId);
-        findMethodExact(classINotificationManager, "deleteNotificationChannel", String::class.java, String::class.java)
-            .hook(hookPermission(0))
-
-        //ParceledListSlice getAppActiveNotifications(String callingPkg, int userId);
-        findMethodExact(classINotificationManager, "getAppActiveNotifications", String::class.java, Int::class.java)
-            .hook(hookPermission(0))
-
-        //ParceledListSlice getNotificationChannelsForPackage(String pkg, int uid, boolean includeDeleted);
-        findMethodExact(classINotificationManager, "getNotificationChannelsForPackage", String::class.java, Int::class.java, Boolean::class.java)
-            .hook(hookPermission(0))
-
-        val deleteNotificationChannelHook: HookContext.() -> Unit = {
-            doBefore {
-                val packageName = args[0] as String
-                if (Binder.getCallingUid() == Process.SYSTEM_UID) {
-                    args[1] = getPackageUid(packageName)
+            ?.hook { chain ->
+                val pkg = chain.getArg(0) as String
+                if (fromHms()) {
+                    Binder.clearCallingIdentity()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val newArgs = chain.args.toMutableList()
+                        newArgs[1] = ANDROID_PACKAGE_NAME
+                        chain.proceed(newArgs.toTypedArray())
+                    } else {
+                        chain.proceed()
+                    }
+                } else {
+                    chain.proceed()
                 }
             }
+
+        findMethodExact(classINotificationManager, "createNotificationChannelsForPackage", String::class.java, Int::class.java, Class.forName("android.content.pm.ParceledListSlice"))
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            findMethodExact(classINotificationManager, "cancelNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Int::class.java)
+                ?.hook { chain ->
+                    val pkg = chain.getArg(0) as String
+                    if (fromHms()) {
+                        Binder.clearCallingIdentity()
+                        val newArgs = chain.args.toMutableList()
+                        newArgs[1] = ANDROID_PACKAGE_NAME
+                        chain.proceed(newArgs.toTypedArray())
+                    } else {
+                        chain.proceed()
+                    }
+                }
+        } else {
+            findMethodExact(classINotificationManager, "cancelNotificationWithTag", String::class.java, String::class.java, Int::class.java, Int::class.java)
+                ?.hook { chain -> doHookPermission(chain, 0, null) }
         }
+
+        findMethodExact(classINotificationManager, "deleteNotificationChannel", String::class.java, String::class.java)
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
+
+        findMethodExact(classINotificationManager, "getAppActiveNotifications", String::class.java, Int::class.java)
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
+
+        findMethodExact(classINotificationManager, "getNotificationChannelsForPackage", String::class.java, Int::class.java, Boolean::class.java)
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
+
+        // deleteNotificationChannel with different params per SDK
+        val deleteNotificationChannelHook: (io.github.libxposed.api.XposedInterface.Chain) -> Any? = { chain ->
+            if (Binder.getCallingUid() == Process.SYSTEM_UID) {
+                val packageName = chain.getArg(0) as String
+                val newArgs = chain.args.toMutableList()
+                newArgs[1] = getPackageUid(packageName)
+                chain.proceed(newArgs.toTypedArray())
+            } else {
+                chain.proceed()
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             try {
-                findClass("com.android.server.notification.PreferencesHelper", classINotificationManager.classLoader)
-                    //public boolean deleteNotificationChannel(String pkg, int uid, String channelId, int callingUid, boolean fromSystemOrSystemUi)
-                    .hookMethod(
-                        "deleteNotificationChannel", String::class.java, Int::class.java, String::class.java, Int::class.java, Boolean::class.java,
-                        callback = deleteNotificationChannelHook
+                Class.forName("com.android.server.notification.PreferencesHelper", false, classINotificationManager.classLoader)
+                    .hookMethod("deleteNotificationChannel", String::class.java, Int::class.java, String::class.java, Int::class.java, Boolean::class.java,
+                        interceptor = deleteNotificationChannelHook
                     )
-            } catch (e: NoSuchMethodError) {
-                //Samsung One UI 7 delete this method
+            } catch (_: NoSuchMethodError) {
                 XLog.d(TAG, "hook deleteNotificationChannel error, NoSuchMethodError")
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            findClass("com.android.server.notification.PreferencesHelper", classINotificationManager.classLoader)
-                //public boolean deleteNotificationChannel(String pkg, int uid, String channelId)
+            Class.forName("com.android.server.notification.PreferencesHelper", false, classINotificationManager.classLoader)
                 .hookMethod("deleteNotificationChannel", String::class.java, Int::class.java, String::class.java,
-                    callback = deleteNotificationChannelHook
+                    interceptor = deleteNotificationChannelHook
                 )
         } else {
-            findClass("com.android.server.notification.RankingHelper", classINotificationManager.classLoader)
-                //public void deleteNotificationChannel(String pkg, int uid, String channelId)
+            Class.forName("com.android.server.notification.RankingHelper", false, classINotificationManager.classLoader)
                 .hookMethod("deleteNotificationChannel", String::class.java, Int::class.java, String::class.java,
-                    callback = deleteNotificationChannelHook
+                    interceptor = deleteNotificationChannelHook
                 )
         }
 
-        //void updateNotificationChannelGroupForPackage(String pkg, int uid, in NotificationChannelGroup group);
         findMethodExact(classINotificationManager, "updateNotificationChannelGroupForPackage", String::class.java, Int::class.java, NotificationChannelGroup::class.java)
-            .hook(hookPermission(0))
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
 
-        //NotificationChannelGroup getNotificationChannelGroupForPackage(String groupId, String pkg, int uid);
         findMethodExact(classINotificationManager, "getNotificationChannelGroupForPackage", String::class.java, String::class.java, Int::class.java)
-            .hook(hookPermission(1))
+            ?.hook { chain -> doHookPermission(chain, 1, null) }
 
-        //ParceledListSlice getNotificationChannelGroupsForPackage(String pkg, int uid, boolean includeDeleted);
         findMethodExact(classINotificationManager, "getNotificationChannelGroupsForPackage", String::class.java, Int::class.java, Boolean::class.java)
-            .hook(hookPermission(0))
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
 
-        //void deleteNotificationChannelGroup(String pkg, String channelGroupId);
         findMethodExact(classINotificationManager, "deleteNotificationChannelGroup", String::class.java, String::class.java)
-            .hook(hookPermission(0))
+            ?.hook { chain -> doHookPermission(chain, 0, null) }
+    }
+
+    private fun doHookPermission(chain: io.github.libxposed.api.XposedInterface.Chain, targetPkgIndex: Int, hookExtra: (() -> Unit)?): Any? {
+        if (fromHms()) {
+            Binder.clearCallingIdentity()
+            hookExtra?.invoke()
+            return chain.proceed()
+        }
+        return chain.proceed()
+    }
+
+    private fun findMethodExact(clazz: Class<*>, name: String, vararg paramTypes: Class<*>): java.lang.reflect.Method? {
+        return findMethodOrNull(clazz, name, *paramTypes)
+    }
+
+    private fun Class<*>.hookMethod(name: String, vararg paramTypes: Class<*>, interceptor: (io.github.libxposed.api.XposedInterface.Chain) -> Any?) {
+        val method = findMethodExact(this, name, *paramTypes) ?: return
+        XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
     }
 }

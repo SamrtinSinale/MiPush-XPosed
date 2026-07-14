@@ -1,12 +1,12 @@
 package one.yufz.hmspush.hook.hms.nm
 
-import android.app.AndroidAppHelper
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.service.notification.StatusBarNotification
 import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.XposedAPI
 import one.yufz.xposed.set
 
 class SelfNotificationManager : INotificationManager {
@@ -14,8 +14,10 @@ class SelfNotificationManager : INotificationManager {
         private const val TAG = "SelfNotificationManager"
     }
 
-    private val notificationManager = AndroidAppHelper.currentApplication()
-        .getSystemService(NotificationManager::class.java)
+    private val notificationManager by lazy {
+        getCurrentApplication()
+            .getSystemService(NotificationManager::class.java)!!
+    }
 
     override fun areNotificationsEnabled(packageName: String, userId: Int): Boolean {
         return true
@@ -39,7 +41,7 @@ class SelfNotificationManager : INotificationManager {
 
     private fun getApplicationName(packageName: String): CharSequence? {
         try {
-            val pm = AndroidAppHelper.currentApplication().packageManager
+            val pm = getCurrentApplication().packageManager
             return pm.getApplicationInfo(packageName, 0).loadLabel(pm)
         } catch (e: Throwable) {
             XLog.e(TAG, "getApplicationName: error", e)
@@ -58,4 +60,6 @@ class SelfNotificationManager : INotificationManager {
     override fun getActiveNotifications(packageName: String, userId: Int): Array<StatusBarNotification> {
         return notificationManager.activeNotifications
     }
+
+    private fun getCurrentApplication(): android.app.Application = XposedAPI.currentApplication()
 }

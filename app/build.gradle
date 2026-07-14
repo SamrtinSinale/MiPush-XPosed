@@ -31,7 +31,7 @@ android {
                 keystorePwd = properties.getProperty("STORE_PASSWORD")
             }
             if (locale != null) {
-                storeFile file(locale)
+                storeFile rootProject.file(locale)
                 storePassword keystorePwd
                 keyAlias alias
                 keyPassword pwd
@@ -69,5 +69,5 @@ dependencies {
     api project(":xposed")
 
     //remove this line will cause proguard to remove code from library module
-    compileOnly 'de.robv.android.xposed:api:82'
+    compileOnly 'io.github.libxposed:api:102.0.0'
 }

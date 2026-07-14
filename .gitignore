@@ -10,3 +10,6 @@
 local.properties
 app/release/
 *.keystore
+release.keystore
+local.properties
+genkey.bat

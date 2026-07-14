@@ -4,7 +4,6 @@ package com.huawei.android.app
 import android.app.Notification
 import android.app.NotificationChannel
 import android.content.Context
-import de.robv.android.xposed.XposedHelpers
 import one.yufz.hmspush.hook.XLog
 import one.yufz.hmspush.hook.hms.PushHistory
 import one.yufz.hmspush.hook.hms.nm.INotificationManager
@@ -63,12 +62,8 @@ object NotificationManagerEx {
     }
 
     private inline fun <R> tryInvoke(invoke: () -> R): R {
-        try {
-            return invoke()
-        } catch (e: XposedHelpers.InvocationTargetError) {
-            XLog.e(TAG, "tryInvoke: ", e)
-            XLog.e(TAG, "tryInvoke targetException: ", e.cause)
-            throw e.cause ?: e
+        return try {
+            invoke()
         } catch (e: InvocationTargetException) {
             XLog.e(TAG, "tryInvoke: ", e)
             XLog.e(TAG, "tryInvoke targetException: ", e.targetException)

@@ -1,62 +1,28 @@
 package one.yufz.hmspush.hook.hms
 
-import android.app.AndroidAppHelper
-import kotlinx.coroutines.runBlocking
+import android.os.Binder
+import android.os.IBinder
 import one.yufz.hmspush.common.BridgeUri
-import one.yufz.hmspush.common.HmsPushInterface
-import one.yufz.hmspush.common.VERSION_CODE
-import one.yufz.hmspush.common.VERSION_NAME
-import one.yufz.hmspush.common.model.IconModel
-import one.yufz.hmspush.common.model.ModuleVersionModel
-import one.yufz.hmspush.common.model.PrefsModel
-import one.yufz.hmspush.common.model.PushHistoryModel
-import one.yufz.hmspush.common.model.PushSignModel
-import one.yufz.hmspush.hook.hms.icon.IconManager
+import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.XposedAPI
 
-object HmsPushService : HmsPushInterface.Stub() {
+object HmsPushService : Binder() {
+    fun getBinder(): IBinder = this
     private const val TAG = "HmsPushService"
 
     fun notifyPushSignChanged() {
-        BridgeUri.PUSH_SIGN.notifyContentChanged(AndroidAppHelper.currentApplication())
+        XLog.d(TAG, "notifyPushSignChanged()")
+        getCurrentApplication().let { app ->
+            BridgeUri.PUSH_SIGN.notifyContentChanged(app)
+        }
     }
 
     fun notifyPushHistoryChanged() {
-        BridgeUri.PUSH_HISTORY.notifyContentChanged(AndroidAppHelper.currentApplication())
+        XLog.d(TAG, "notifyPushHistoryChanged()")
+        getCurrentApplication().let { app ->
+            BridgeUri.PUSH_HISTORY.notifyContentChanged(app)
+        }
     }
 
-    override fun getModuleVersion(): ModuleVersionModel {
-        return ModuleVersionModel(VERSION_NAME, VERSION_CODE)
-    }
-
-    override fun getPushSignList(): List<PushSignModel> {
-        return PushSignWatcher.getRegisterPackages()
-    }
-
-    override fun unregisterPush(packageName: String) {
-        PushSignWatcher.unregisterSign(packageName)
-    }
-
-    override fun getPushHistoryList(): List<PushHistoryModel> {
-        return PushHistory.getAll()
-    }
-
-    override fun getPreference(): PrefsModel {
-        return Prefs.prefModel
-    }
-
-    override fun updatePreference(model: PrefsModel) {
-        Prefs.updatePreference(model)
-    }
-
-    override fun getAllIcon(): List<IconModel> {
-        return runBlocking { IconManager.getAllIconModel() }
-    }
-
-    override fun saveIcon(iconModel: IconModel) {
-        runBlocking { IconManager.saveToLocal(iconModel.packageName, iconModel.iconData!!) }
-    }
-
-    override fun deleteIcon(packageNames: Array<String>) {
-        runBlocking { IconManager.deleteIcon(packageNames) }
-    }
+    private fun getCurrentApplication(): android.app.Application = XposedAPI.currentApplication()
 }

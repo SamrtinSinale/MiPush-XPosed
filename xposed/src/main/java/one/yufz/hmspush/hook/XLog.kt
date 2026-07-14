@@ -1,42 +1,50 @@
 package one.yufz.hmspush.hook
 
 import android.util.Log
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import one.yufz.hmspush.xposed.BuildConfig
+import one.yufz.xposed.XposedAPI
 import java.lang.reflect.Method
 
 object XLog {
     fun t(tag: String, message: String?) {
-        if (BuildConfig.DEBUG) {
-            XposedBridge.log("[MiPush][T][$tag] $message")
+        if (isDebug()) {
+            XposedAPI.requireApi().log(Log.DEBUG, "[MiPush][T][$tag]", message ?: "")
         }
     }
+
     fun d(tag: String, message: String?) {
-        XposedBridge.log("[MiPush][D][$tag] $message")
+        XposedAPI.requireApi().log(Log.DEBUG, "[MiPush][D][$tag]", message ?: "")
     }
 
     fun i(tag: String, message: String?) {
-        XposedBridge.log("[MiPush][I][$tag] $message")
+        XposedAPI.requireApi().log(Log.INFO, "[MiPush][I][$tag]", message ?: "")
     }
 
     fun e(tag: String, message: String?, throwable: Throwable?) {
-        XposedBridge.log("[MiPush][E][$tag] $message")
-        XposedBridge.log(throwable)
+        XposedAPI.requireApi().log(Log.ERROR, "[MiPush][E][$tag]", message ?: "")
+        if (throwable != null) {
+            XposedAPI.requireApi().log(Log.ERROR, "[MiPush][E][$tag]", Log.getStackTraceString(throwable))
+        }
     }
 
-    fun XC_MethodHook.MethodHookParam.logMethod(tag: String, stackTrace: Boolean = false) {
+    /**
+     * Log a method call with its parameters and return value/exception.
+     */
+    fun logMethod(tag: String, chain: io.github.libxposed.api.XposedInterface.Chain, stackTrace: Boolean = false) {
         d(tag, "╔═══════════════════════════════════════════════════════")
-        d(tag, method.toString())
-        d(tag, "${method.name} called with ${args.contentDeepToString()}")
+        d(tag, chain.executable.toString())
+        d(tag, "${chain.executable.name} called with ${chain.args.joinToString()}")
         if (stackTrace) {
             d(tag, Log.getStackTraceString(Throwable()))
         }
-        if (hasThrowable()) {
-            e(tag, "${method.name} thrown", throwable)
-        } else if (method is Method && (method as Method).returnType != Void.TYPE) {
-            d(tag, "${method.name} return $result")
-        }
         d(tag, "╚═══════════════════════════════════════════════════════")
+    }
+
+    private fun isDebug(): Boolean {
+        return try {
+            val buildConfigClass = Class.forName("one.yufz.hmspush.xposed.BuildConfig")
+            buildConfigClass.getDeclaredField("DEBUG").getBoolean(null)
+        } catch (_: Throwable) {
+            false
+        }
     }
 }

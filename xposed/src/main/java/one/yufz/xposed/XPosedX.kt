@@ -1,120 +1,233 @@
 package one.yufz.xposed
 
+import io.github.libxposed.api.XposedInterface
+import io.github.libxposed.api.XposedInterface.Chain
+import java.lang.reflect.*
 
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
-import java.lang.reflect.Method
+/**
+ * Global XposedAPI holder, initialized by XposedMod.onModuleLoaded().
+ */
+object XposedAPI {
+    lateinit var api: XposedInterface
+        internal set
 
+    fun requireApi(): XposedInterface {
+        if (!::api.isInitialized) throw IllegalStateException("XposedAPI not initialized")
+        return api
+    }
 
-fun Any.callMethod(methodName: String, vararg args: Any): Any? =
-    XposedHelpers.callMethod(this, methodName, *args)
+    /**
+     * Get the current Application via ActivityThread reflection.
+     * Works even when Context is not directly available.
+     */
+    fun currentApplication(): android.app.Application {
+        val activityThreadClass = Class.forName("android.app.ActivityThread")
+        val method = activityThreadClass.getDeclaredMethod("currentApplication").apply { isAccessible = true }
+        return method.invoke(null) as android.app.Application
+    }
 
-fun Any.callMethod(methodName: String, parameterTypes: Array<Class<*>>, vararg args: Any): Any? =
-    XposedHelpers.callMethod(this, methodName, parameterTypes, *args)
+    /**
+     * Get PackageManager and resolve UID for a package.
+     */
+    fun getPackageUid(packageName: String): Int {
+        val app = currentApplication()
+        val pm = android.content.Context::class.java.getMethod("getPackageManager").apply { isAccessible = true }.invoke(app)
+        return pm.javaClass.getMethod("getPackageUid", String::class.java, Int::class.java).apply { isAccessible = true }
+            .invoke(pm, packageName, 0) as Int
+    }
+}
 
-fun Class<*>.callStaticMethod(methodName: String, vararg args: Any): Any? =
-    XposedHelpers.callStaticMethod(this, methodName, *args)
+// ---------------------------------------------------------------------------
+// Method/Constructor invocation helpers (replaces XposedHelpers.callMethod)
+// ---------------------------------------------------------------------------
 
-fun Class<*>.callStaticMethod(
-    methodName: String,
-    parameterTypes: Array<Class<*>>,
-    vararg args: Any
-): Any? = XposedHelpers.callStaticMethod(this, methodName, parameterTypes, *args)
+fun Any.callMethod(methodName: String, vararg args: Any?): Any? {
+    val paramTypes = args.map { it?.javaClass ?: Any::class.java }.toTypedArray()
+    val method = javaClass.getDeclaredMethod(methodName, *paramTypes).apply { isAccessible = true }
+    return method.invoke(this, *args)
+}
 
-typealias HookAction = XC_MethodHook.MethodHookParam.() -> Unit
-typealias ReplaceAction = XC_MethodHook.MethodHookParam.() -> Any?
-typealias HookCallback = HookContext.() -> Unit
+@Suppress("UNCHECKED_CAST")
+fun <T> Any.callMethod(methodName: String, parameterTypes: Array<Class<*>>, vararg args: Any?): T? {
+    val method = javaClass.getDeclaredMethod(methodName, *parameterTypes).apply { isAccessible = true }
+    return method.invoke(this, *args) as? T?
+}
 
-fun Class<*>.hookMethod(methodName: String, vararg parameterTypes: Class<*>, callback: HookCallback) =
-    XposedHelpers.findAndHookMethod(this, methodName, *parameterTypes, MethodHook(callback))
+fun Class<*>.callStaticMethod(methodName: String, vararg args: Any?): Any? {
+    val paramTypes = args.map { it?.javaClass ?: Any::class.java }.toTypedArray()
+    val method = getDeclaredMethod(methodName, *paramTypes).apply { isAccessible = true }
+    return method.invoke(null, *args)
+}
 
-fun Class<*>.hookConstructor(vararg parameterTypes: Class<*>, callback: HookCallback) =
-    XposedHelpers.findAndHookConstructor(this, *parameterTypes, MethodHook(callback))
+@Suppress("UNCHECKED_CAST")
+fun <T> Class<*>.callStaticMethod(methodName: String, parameterTypes: Array<Class<*>>, vararg args: Any?): T? {
+    val method = getDeclaredMethod(methodName, *parameterTypes).apply { isAccessible = true }
+    return method.invoke(null, *args) as? T?
+}
 
-fun Class<*>.hookAllConstructor(callback: HookCallback) =
-    XposedBridge.hookAllConstructors(this, MethodHook(callback))
+// ---------------------------------------------------------------------------
+// Class finding (replaces XposedHelpers.findClass)
+// ---------------------------------------------------------------------------
 
-fun hookMethod(className: String, classLoader: ClassLoader, methodName: String, vararg parameterTypes: Class<*>, callback: HookCallback) =
-    XposedHelpers.findAndHookMethod(className, classLoader, methodName, *parameterTypes, MethodHook(callback))
+fun ClassLoader.findClass(className: String): Class<*> {
+    return Class.forName(className, false, this)
+}
 
-fun hookConstructor(className: String, classLoader: ClassLoader, methodName: String, vararg parameterTypes: Class<*>, callback: HookCallback) =
-    XposedHelpers.findAndHookConstructor(className, classLoader, methodName, *parameterTypes, MethodHook(callback))
+fun ClassLoader.findClassOrNull(className: String): Class<*>? {
+    return try {
+        Class.forName(className, false, this)
+    } catch (_: ClassNotFoundException) {
+        null
+    }
+}
 
-fun Method.hook(callback: HookCallback) = XposedBridge.hookMethod(this, MethodHook(callback))
+// ---------------------------------------------------------------------------
+// Constructor invocation (replaces XposedHelpers.newInstance)
+// ---------------------------------------------------------------------------
 
-fun Class<*>.hookAllMethods(methodName: String, callback: HookCallback) =
-    XposedBridge.hookAllMethods(this, methodName, MethodHook(callback))
+fun <T> Class<T>.newInstance(vararg args: Any?): T {
+    val paramTypes = args.map { it?.javaClass ?: Any::class.java }.toTypedArray()
+    val constructor = getDeclaredConstructor(*paramTypes).apply { isAccessible = true }
+    return constructor.newInstance(*args)
+}
 
-class MethodHook(callback: HookCallback) : XC_MethodHook() {
-    private val context = HookContext(this).apply(callback)
+fun <T> Class<T>.newInstance(parameterTypes: Array<Class<*>>, vararg args: Any?): T {
+    val constructor = getDeclaredConstructor(*parameterTypes).apply { isAccessible = true }
+    return constructor.newInstance(*args)
+}
 
-    override fun beforeHookedMethod(param: MethodHookParam) {
-        super.beforeHookedMethod(param)
+// ---------------------------------------------------------------------------
+// Hook helpers for API 102 interceptor chain
+// ---------------------------------------------------------------------------
 
-        context.replaceAction?.let {
-            if (context.needHook?.invoke() == false) {
-                return
-            }
-            try {
-                param.result = it.invoke(param)
-            } catch (t: Throwable) {
-                param.throwable = t
-            }
-            return
+/**
+ * Extension to hook a method. Returns the HookHandle so it can be unhooked later.
+ */
+fun Method.hook(interceptor: (Chain) -> Any?): XposedInterface.HookHandle {
+    val api = XposedAPI.requireApi()
+    return api.hook(this).intercept(object : XposedInterface.Hooker {
+        override fun intercept(chain: XposedInterface.Chain): Any? {
+            return interceptor(chain)
         }
-
-        context.beforeAction?.invoke(param)
-    }
-
-    override fun afterHookedMethod(param: MethodHookParam) {
-        super.afterHookedMethod(param)
-        context.afterAction?.invoke(param)
-    }
-
+    })
 }
 
-class HookContext(private val methodHook: MethodHook) {
-    internal var beforeAction: HookAction? = null
-        private set
+/**
+ * Hook a constructor, returns the HookHandle.
+ */
+fun <T> Constructor<T>.hook(interceptor: (Chain) -> Any?): XposedInterface.HookHandle {
+    val api = XposedAPI.requireApi()
+    return api.hook(this).intercept(object : XposedInterface.Hooker {
+        override fun intercept(chain: XposedInterface.Chain): Any? {
+            return interceptor(chain)
+        }
+    })
+}
 
-    internal var afterAction: HookAction? = null
-        private set
-
-    internal var replaceAction: ReplaceAction? = null
-        private set
-
-    internal var needHook: (() -> Boolean)? = null
-        private set
-
-    fun doBefore(action: HookAction) {
-        this.beforeAction = action
+/**
+ * Hook all methods with the given name on this class.
+ */
+fun Class<*>.hookAllMethods(methodName: String, interceptor: (Chain) -> Any?) {
+    declaredMethods.filter { it.name == methodName }.forEach { method ->
+        XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
     }
-
-    fun doAfter(action: HookAction) {
-        this.afterAction = action
-    }
-
-    fun replace(action: ReplaceAction) {
-        this.replaceAction = action
-    }
-
-    fun replace(hookCheck : () -> Boolean, action: ReplaceAction) {
-        this.needHook = hookCheck
-        this.replaceAction = action
-    }
-
-    fun XC_MethodHook.MethodHookParam.unhook() {
-        XposedBridge.unhookMethod(this.method, methodHook)
+    // Also check superclass methods
+    var superClass = superclass
+    while (superClass != null) {
+        superClass.declaredMethods.filter { it.name == methodName }.forEach { method ->
+            XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
+        }
+        superClass = superClass.superclass
     }
 }
 
-fun Class<*>.newInstance(vararg args: Any): Any = XposedHelpers.newInstance(this, *args)
+/**
+ * Hook a method by class name + classLoader + method name + parameter types.
+ */
+fun hookMethod(
+    className: String,
+    classLoader: ClassLoader,
+    methodName: String,
+    vararg parameterTypes: Class<*>,
+    interceptor: (Chain) -> Any?
+): XposedInterface.HookHandle {
+    val clazz = classLoader.findClass(className)
+    val method = findMethodOrNull(clazz, methodName, *parameterTypes)
+        ?: throw NoSuchMethodError("$className.$methodName")
+    return XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
+}
 
-fun Class<*>.newInstance(parameterTypes: Array<Class<*>>, vararg args: Any): Any =
-    XposedHelpers.newInstance(this, parameterTypes, *args)
+/**
+ * Hook a constructor by class name + classLoader + parameter types.
+ */
+fun hookConstructor(
+    className: String,
+    classLoader: ClassLoader,
+    vararg parameterTypes: Class<*>,
+    interceptor: (Chain) -> Any?
+): XposedInterface.HookHandle {
+    val clazz = classLoader.findClass(className)
+    val constructor = clazz.getDeclaredConstructor(*parameterTypes).apply { isAccessible = true }
+    return XposedAPI.requireApi().hook(constructor).intercept { chain -> interceptor(chain) }
+}
 
-fun ClassLoader.findClass(className: String): Class<*> = XposedHelpers.findClass(className, this)
+/**
+ * Hook all constructors of a class.
+ */
+fun Class<*>.hookAllConstructor(interceptor: (Chain) -> Any?) {
+    declaredConstructors.forEach { ctor ->
+        XposedAPI.requireApi().hook(ctor).intercept { chain -> interceptor(chain) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fluent hook helpers (for Class.hookMethod style like the old DSL)
+// ---------------------------------------------------------------------------
+
+fun Class<*>.hookMethod(
+    methodName: String,
+    vararg parameterTypes: Class<*>,
+    interceptor: (Chain) -> Any?
+): XposedInterface.HookHandle {
+    val method = findMethodOrNull(this, methodName, *parameterTypes)
+        ?: throw NoSuchMethodError("${name}.$methodName")
+    return XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
+}
+
+// ---------------------------------------------------------------------------
+// Reflection utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Find method in class hierarchy, returns null if not found.
+ */
+fun findMethodOrNull(clazz: Class<*>, methodName: String, vararg parameterTypes: Class<*>): Method? {
+    var current: Class<*>? = clazz
+    while (current != null) {
+        try {
+            return current.getDeclaredMethod(methodName, *parameterTypes).apply { isAccessible = true }
+        } catch (_: NoSuchMethodException) {
+            current = current.superclass
+        }
+    }
+    return null
+}
+
+// ---------------------------------------------------------------------------
+// Field access helpers (replaces XposedHelpers field access)
+// ---------------------------------------------------------------------------
+
+private fun findField(clazz: Class<*>, fieldName: String): Field {
+    var current: Class<*>? = clazz
+    while (current != null) {
+        try {
+            return current.getDeclaredField(fieldName).apply { isAccessible = true }
+        } catch (_: NoSuchFieldException) {
+            current = current.superclass
+        }
+    }
+    throw NoSuchFieldException("${clazz.name}.$fieldName")
+}
 
 inline fun <reified T> Any.getOrNull(name: String): T? = getField(name, T::class.java)
 
@@ -127,24 +240,24 @@ fun <T> Any.getField(name: String, fieldClazz: Class<T>): T? {
     val thisClass = if (this is Class<*>) this else this.javaClass
     val field = findField(thisClass, name)
 
+    @Suppress("UNCHECKED_CAST")
     val value = when (fieldClazz) {
-        Boolean::class.java -> field.getBoolean(obj)
-        Byte::class.java -> field.getByte(obj)
-        Char::class.java -> field.getChar(obj)
-        Double::class.java -> field.getDouble(obj)
-        Float::class.java -> field.getFloat(obj)
-        Int::class.java -> field.getInt(obj)
-        Long::class.java -> field.getLong(obj)
-        Short::class.java -> field.getShort(obj)
+        Boolean::class.java -> field.getBoolean(obj) as Any
+        Byte::class.java -> field.getByte(obj) as Any
+        Char::class.java -> field.getChar(obj) as Any
+        Double::class.java -> field.getDouble(obj) as Any
+        Float::class.java -> field.getFloat(obj) as Any
+        Int::class.java -> field.getInt(obj) as Any
+        Long::class.java -> field.getLong(obj) as Any
+        Short::class.java -> field.getShort(obj) as Any
         else -> field.get(obj)
     }
-    return value as? T?
+    return value as? T
 }
 
 fun <T> Any.setField(name: String, value: T?, fieldClass: Class<T>) {
     val obj = if (this is Class<*>) null else this
     val thisClass = if (this is Class<*>) this else this.javaClass
-
     val field = findField(thisClass, name)
 
     when (fieldClass) {
@@ -160,4 +273,13 @@ fun <T> Any.setField(name: String, value: T?, fieldClass: Class<T>) {
     }
 }
 
-private fun findField(clazz: Class<*>, fieldName: String) = XposedHelpers.findField(clazz, fieldName)
+/**
+ * Get an invoker for the given method (bypasses access checks).
+ */
+fun getInvoker(method: Method): XposedInterface.Invoker<*, Method> {
+    return XposedAPI.requireApi().getInvoker(method)
+}
+
+fun <T> getInvoker(constructor: Constructor<T>): XposedInterface.CtorInvoker<T> {
+    return XposedAPI.requireApi().getInvoker(constructor)
+}

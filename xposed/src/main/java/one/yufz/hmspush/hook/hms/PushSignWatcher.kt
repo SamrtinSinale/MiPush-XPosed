@@ -1,11 +1,11 @@
 package one.yufz.hmspush.hook.hms
 
-import android.app.AndroidAppHelper
 import android.content.Context
 import android.content.SharedPreferences
 import one.yufz.hmspush.common.BridgeUri
 import one.yufz.hmspush.common.model.PushSignModel
 import one.yufz.hmspush.hook.XLog
+import one.yufz.xposed.XposedAPI
 
 
 object PushSignWatcher : SharedPreferences.OnSharedPreferenceChangeListener {
@@ -16,7 +16,8 @@ object PushSignWatcher : SharedPreferences.OnSharedPreferenceChangeListener {
     fun watch() {
         XLog.d(TAG, "watch() called")
 
-        val pushSignPref = AndroidAppHelper.currentApplication().createDeviceProtectedStorageContext()
+        val app = getCurrentApplication()
+        val pushSignPref = app.createDeviceProtectedStorageContext()
             .getSharedPreferences("PushSign", Context.MODE_PRIVATE)
 
         logPushSign(pushSignPref)
@@ -51,7 +52,8 @@ object PushSignWatcher : SharedPreferences.OnSharedPreferenceChangeListener {
     }
 
     private fun notifyChange() {
-        AndroidAppHelper.currentApplication().contentResolver.notifyChange(BridgeUri.PUSH_SIGN.toUri(), null, false)
+        val app = getCurrentApplication()
+        app.contentResolver.notifyChange(BridgeUri.PUSH_SIGN.toUri(), null, false)
         HmsPushService.notifyPushSignChanged()
     }
 
@@ -68,4 +70,6 @@ object PushSignWatcher : SharedPreferences.OnSharedPreferenceChangeListener {
     fun unregisterSign(packageName: String) {
         RuntimeKitHook.sendFakePackageRemoveBroadcast(packageName)
     }
+
+    private fun getCurrentApplication(): android.app.Application = XposedAPI.currentApplication()
 }

@@ -4,13 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationChannelGroup
 import android.service.notification.StatusBarNotification
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.XposedHelpers.ClassNotFoundError
 import one.yufz.hmspush.hook.XLog
 import one.yufz.hmspush.hook.hms.nm.SystemNotificationManager
 import one.yufz.hmspush.hook.system.HookSystemService
+import one.yufz.xposed.XposedAPI
 import one.yufz.xposed.findClass
-import one.yufz.xposed.hookMethod
+import one.yufz.xposed.findClassOrNull
 import one.yufz.xposed.set
 import java.lang.reflect.InvocationTargetException
 
@@ -22,20 +21,11 @@ object HookPushNC {
     private val hookCheck = { HookSystemService.isSystemHookReady }
 
     fun canHook(classLoader: ClassLoader): Boolean {
-        return try {
-            classLoader.findClass(TargetClass)
-            true
-        } catch (e: ClassNotFoundError) {
-            false
-        }
+        return classLoader.findClassOrNull(TargetClass) != null
     }
 
     fun hook(classLoader: ClassLoader) {
         XLog.d(TAG, "hookPushNC() called with: classLoader = $classLoader")
-
-//        FakeHsf.hook(classLoader)
-
-//        PushSignWatcher.watch()
 
         val classNotificationManager = classLoader.findClass(TargetClass)
 
@@ -45,217 +35,215 @@ object HookPushNC {
 
         }
 
-        //notify(
-        //        packageName: String,
-        //        tag: String?, id: Int, notification: Notification
-        //    )
-        classNotificationManager.hookMethod(
-            "notify",
-            String::class.java,
-            String::class.java,
-            Int::class.java,
-            Notification::class.java
-        ) {
-            replace(hookCheck) {
+        val api = XposedAPI.requireApi()
+
+        // notify(String packageName, String tag, int id, Notification notification)
+        classNotificationManager.declaredMethods.find {
+            it.name == "notify" && it.parameterCount == 4
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.notify(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as String?,
+                            chain.getArg(2) as Int,
+                            chain.getArg(3) as Notification
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // cancel(String packageName, String tag, int id)
+        classNotificationManager.declaredMethods.find {
+            it.name == "cancel" && it.parameterCount == 3
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.cancel(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as String?,
+                            chain.getArg(2) as Int
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // createNotificationChannels(String packageName, List channels)
+        classNotificationManager.declaredMethods.find {
+            it.name == "createNotificationChannels" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        @Suppress("UNCHECKED_CAST")
+                        SystemNotificationManager.createNotificationChannels(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as List<NotificationChannel>
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // getNotificationChannel(String packageName, String channelId)
+        classNotificationManager.declaredMethods.find {
+            it.name == "getNotificationChannel" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
                 tryInvoke {
-                    SystemNotificationManager.notify(
-                        args[0] as String,
-                        args[1] as String?,
-                        args[2] as Int,
-                        args[3] as Notification
+                    SystemNotificationManager.getNotificationChannel(
+                        chain.getArg(0) as String,
+                        chain.getArg(1) as String
                     )
                 }
             }
         }
 
-        //cancel(
-        //        packageName: String,
-        //        tag: String?, id: Int
-        //    )
-        classNotificationManager.hookMethod(
-            "cancel",
-            String::class.java,
-            String::class.java,
-            Int::class.java
-        ) {
-            replace(hookCheck) {
+        // getNotificationChannels(String packageName)
+        classNotificationManager.declaredMethods.find {
+            it.name == "getNotificationChannels" && it.parameterCount == 1
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.getNotificationChannels(
+                            chain.getArg(0) as String
+                        )
+                    }
+                } else {
+                    chain.proceed()
+                }
+            }
+        }
+
+        // deleteNotificationChannel(String packageName, String channelId)
+        classNotificationManager.declaredMethods.find {
+            it.name == "deleteNotificationChannel" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.deleteNotificationChannel(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as String
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // createNotificationChannelGroups(String packageName, List groups)
+        classNotificationManager.declaredMethods.find {
+            it.name == "createNotificationChannelGroups" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        @Suppress("UNCHECKED_CAST")
+                        SystemNotificationManager.createNotificationChannelGroups(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as List<NotificationChannelGroup>
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // getNotificationChannelGroup(String packageName, String groupId)
+        classNotificationManager.declaredMethods.find {
+            it.name == "getNotificationChannelGroup" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
                 tryInvoke {
-                    SystemNotificationManager.cancel(
-                        args[0] as String,
-                        args[1] as String?,
-                        args[2] as Int
+                    SystemNotificationManager.getNotificationChannelGroup(
+                        chain.getArg(0) as String,
+                        chain.getArg(1) as String
                     )
                 }
             }
         }
 
-        //createNotificationChannels(
-        //        packageName: String,
-        //        channels: List<NotificationChannel?>
-        //    )
-        classNotificationManager.hookMethod(
-            "createNotificationChannels",
-            String::class.java,
-            List::class.java
-        ) {
-            replace(hookCheck) {
-                tryInvoke {
-                    SystemNotificationManager.createNotificationChannels(
-                        args[0] as String,
-                        args[1] as List<NotificationChannel>
-                    )
+        // getNotificationChannelGroups(String packageName)
+        classNotificationManager.declaredMethods.find {
+            it.name == "getNotificationChannelGroups" && it.parameterCount == 1
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.getNotificationChannelGroups(
+                            chain.getArg(0) as String
+                        )
+                    }
+                } else {
+                    chain.proceed()
                 }
             }
         }
 
-        //getNotificationChannel(
-        //        packageName: String,
-        //        channelId: String?
-        //    ): NotificationChannel?
-        classNotificationManager.hookMethod(
-            "getNotificationChannel",
-            String::class.java,
-            String::class.java
-        ) {
-            replace() {
-                tryInvoke {
-                    return@replace SystemNotificationManager.getNotificationChannel(
-                        args[0] as String,
-                        args[1] as String
-                    ) as NotificationChannel?
+        // deleteNotificationChannelGroup(String packageName, String groupId)
+        classNotificationManager.declaredMethods.find {
+            it.name == "deleteNotificationChannelGroup" && it.parameterCount == 2
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.deleteNotificationChannelGroup(
+                            chain.getArg(0) as String,
+                            chain.getArg(1) as String
+                        )
+                    }
+                }
+                null
+            }
+        }
+
+        // areNotificationsEnabled(String packageName)
+        classNotificationManager.declaredMethods.find {
+            it.name == "areNotificationsEnabled" && it.parameterCount == 1
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.areNotificationsEnabled(
+                            chain.getArg(0) as String
+                        )
+                    }
+                } else {
+                    chain.proceed()
                 }
             }
         }
 
-        //getNotificationChannels(
-        //        packageName: String
-        //    ): List<NotificationChannel?>?
-        classNotificationManager.hookMethod("getNotificationChannels", String::class.java) {
-            replace(hookCheck) {
-                tryInvoke {
-                    return@replace SystemNotificationManager.getNotificationChannels(args[0] as String) as List<NotificationChannel?>?
+        // getActiveNotifications(String packageName)
+        classNotificationManager.declaredMethods.find {
+            it.name == "getActiveNotifications" && it.parameterCount == 1
+        }?.let { method ->
+            api.hook(method).intercept { chain ->
+                if (hookCheck()) {
+                    tryInvoke {
+                        SystemNotificationManager.getActiveNotifications(
+                            chain.getArg(0) as String
+                        )
+                    }
+                } else {
+                    chain.proceed()
                 }
             }
         }
-
-        //deleteNotificationChannel(
-        //        packageName: String,
-        //        channelId: String?
-        //    )
-        classNotificationManager.hookMethod(
-            "deleteNotificationChannel",
-            String::class.java,
-            String::class.java
-        ) {
-            replace(hookCheck) {
-                tryInvoke {
-                    SystemNotificationManager.deleteNotificationChannel(
-                        args[0] as String,
-                        args[1] as String
-                    )
-                }
-            }
-        }
-
-        //createNotificationChannelGroups(
-        //        packageName: String,
-        //        groups: List<NotificationChannelGroup?>
-        //    )
-        classNotificationManager.hookMethod(
-            "createNotificationChannelGroups",
-            String::class.java,
-            List::class.java
-        ) {
-            replace(hookCheck) {
-                tryInvoke {
-                    SystemNotificationManager.createNotificationChannelGroups(
-                        args[0] as String,
-                        args[1] as List<NotificationChannelGroup>
-                    )
-                }
-            }
-        }
-
-        //getNotificationChannelGroup(
-        //        packageName: String,
-        //        groupId: String?
-        //    ): NotificationChannelGroup?
-        classNotificationManager.hookMethod(
-            "getNotificationChannelGroup",
-            String::class.java,
-            String::class.java
-        ) {
-            replace(hookCheck) {
-                tryInvoke {
-                    return@replace SystemNotificationManager.getNotificationChannelGroup(
-                        args[0] as String,
-                        args[1] as String
-                    ) as NotificationChannelGroup?
-                }
-            }
-        }
-
-        //getNotificationChannelGroups(
-        //        packageName: String
-        //    ): List<NotificationChannelGroup?>?
-        classNotificationManager.hookMethod("getNotificationChannelGroups", String::class.java) {
-            replace(hookCheck) {
-                tryInvoke {
-                    return@replace SystemNotificationManager.getNotificationChannelGroups(args[0] as String) as List<NotificationChannelGroup?>?
-                }
-            }
-        }
-
-        //deleteNotificationChannelGroup(
-        //        packageName: String,
-        //        groupId: String?
-        //    )
-        classNotificationManager.hookMethod(
-            "deleteNotificationChannelGroup",
-            String::class.java,
-            String::class.java
-        ) {
-            replace(hookCheck) {
-                tryInvoke {
-                    SystemNotificationManager.deleteNotificationChannelGroup(
-                        args[0] as String,
-                        args[1] as String
-                    )
-                }
-            }
-        }
-
-        //areNotificationsEnabled(
-        //        packageName: String
-        //    ): Boolean
-        classNotificationManager.hookMethod("areNotificationsEnabled", String::class.java) {
-            replace(hookCheck) {
-                tryInvoke {
-                    return@replace SystemNotificationManager.areNotificationsEnabled(args[0] as String)
-                }
-            }
-        }
-
-        //getActiveNotifications(
-        //        packageName: String
-        //    ): Array<StatusBarNotification?>?
-        classNotificationManager.hookMethod("getActiveNotifications", String::class.java) {
-            replace(hookCheck) {
-                tryInvoke {
-                    return@replace SystemNotificationManager.getActiveNotifications(args[0] as String) as Array<StatusBarNotification?>?
-                }
-            }
-        }
-
     }
 
     private inline fun <R> tryInvoke(invoke: () -> R): R {
-        try {
-            return invoke()
-        } catch (e: XposedHelpers.InvocationTargetError) {
-            XLog.e(TAG, "tryInvoke: ", e)
-            XLog.e(TAG, "tryInvoke targetException: ", e.cause)
-            throw e.cause ?: e
+        return try {
+            invoke()
         } catch (e: InvocationTargetException) {
             XLog.e(TAG, "tryInvoke: ", e)
             XLog.e(TAG, "tryInvoke targetException: ", e.targetException)

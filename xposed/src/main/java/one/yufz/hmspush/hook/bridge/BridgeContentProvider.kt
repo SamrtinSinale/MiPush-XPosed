@@ -31,7 +31,7 @@ class BridgeContentProvider {
         return if (code != -1) {
             when (BridgeUri.values()[code]) {
                 BridgeUri.DISABLE_SIGNATURE -> queryIsDisableSignature()
-                BridgeUri.HMS_PUSH_SERVICE -> BinderCursor(HmsPushService)
+                BridgeUri.HMS_PUSH_SERVICE -> BinderCursor(HmsPushService.getBinder())
                 else -> throw IllegalStateException("Unsupported")
             }
         } else {
@@ -41,7 +41,7 @@ class BridgeContentProvider {
 
     private fun queryIsDisableSignature(): Cursor? {
         return MatrixCursor(arrayOf("disableSignature")).apply {
-            addRow(arrayOf(if (Prefs.isDisableSignature()) 1 else 0))
+            addRow(arrayOf(if (Prefs.isDisableSignature) 1 else 0))
         }
     }
 }

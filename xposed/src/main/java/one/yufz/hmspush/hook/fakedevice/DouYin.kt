@@ -1,21 +1,20 @@
 package one.yufz.hmspush.hook.fakedevice
 
 import android.os.Build
-import de.robv.android.xposed.callbacks.XC_LoadPackage
+import one.yufz.hmspush.hook.IFakeParam
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.findClass
 import one.yufz.xposed.hookMethod
 import org.json.JSONArray
 import org.json.JSONObject
 
-
 class DouYin : Common() {
     companion object {
         private const val TAG = "DouYin"
     }
 
-    override fun fake(lpparam: XC_LoadPackage.LoadPackageParam): Boolean {
-        super.fake(lpparam)
+    override fun fake(param: IFakeParam): Boolean {
+        super.fake(param)
         if (Build.DISPLAY.contains("flyme", true) || Build.USER.contains("flyme", true)) {
             fakeProperty("ro.build.display.id" to "")
             fakeProperty("ro.build.user" to "")
@@ -23,25 +22,26 @@ class DouYin : Common() {
             fakeProperty("ro.flyme.version.id" to "")
         }
 
-        //public java.lang.String com.bytedance.common.network.DefaultNetWorkClient.post(java.lang.String,java.util.List,java.util.Map,com.bytedance.common.utility.NetworkClient$ReqContext)
-        val classAppLogNetworkClient = lpparam.classLoader.findClass("com.ss.android.ugc.aweme.statistic.AppLogNetworkClient")
-        val classReqContext = lpparam.classLoader.findClass("com.bytedance.common.utility.NetworkClient\$ReqContext")
-        classAppLogNetworkClient.hookMethod("post", String::class.java, List::class.java, Map::class.java, classReqContext) {
-            doAfter {
-                val url = args[0] as String
-                if (!url.contains("/cloudpush/update_sender/")) return@doAfter
+        val classLoader = when (param) {
+            is one.yufz.hmspush.hook.FakeDeviceParam -> param.classLoader
+            else -> return true
+        }
 
-                XLog.d(TAG, result.toString())
+        val classAppLogNetworkClient = classLoader.findClass("com.ss.android.ugc.aweme.statistic.AppLogNetworkClient")
+        val classReqContext = classLoader.findClass("com.bytedance.common.utility.NetworkClient\$ReqContext")
+        classAppLogNetworkClient.hookMethod("post", String::class.java, List::class.java, Map::class.java, classReqContext) { chain ->
+            val url = chain.getArg(0) as String
+            val result = chain.proceed() as? String
 
-                val json = result as String
-                val obj = JSONObject(json)
-                val allowPushList = obj.getJSONArray("allow_push_list")
+            if (url.contains("/cloudpush/update_sender/") && result != null) {
+                XLog.d(TAG, result)
+                val json = JSONObject(result)
+                val allowPushList = json.getJSONArray("allow_push_list")
                 val newArray = tryInsertMiPushChannel(allowPushList)
-                obj.put("allow_push_list", newArray)
-
-                result = obj.toString()
-
-                XLog.d(TAG, result.toString())
+                json.put("allow_push_list", newArray)
+                json.toString()
+            } else {
+                result
             }
         }
         return true

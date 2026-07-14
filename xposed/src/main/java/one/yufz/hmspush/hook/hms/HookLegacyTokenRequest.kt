@@ -2,14 +2,13 @@ package one.yufz.hmspush.hook.hms
 
 import android.content.Context
 import android.content.Intent
-import de.robv.android.xposed.XposedHelpers
 import one.yufz.hmspush.common.HMS_CORE_PUSH_ACTION_REGISTRATION
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.callMethod
 import one.yufz.xposed.findClass
 import one.yufz.xposed.get
 import one.yufz.xposed.hook
-import one.yufz.xposed.hookMethod
+import java.lang.reflect.Method
 
 object HookLegacyTokenRequest {
     private const val TAG = "HookLegacyTokenRequest"
@@ -22,14 +21,16 @@ object HookLegacyTokenRequest {
         }
         XLog.d(TAG, "hook() called with: classKmsMessageCenter = ${classKmsMessageCenter?.classLoader}")
 
-        classKmsMessageCenter?.hookMethod("register", String::class.java, Class::class.java, Boolean::class.java, Boolean::class.java) {
-            doBefore {
-                val uri = args[0] as String
-                if (uri == "push.gettoken") {
-                    unhook()
-                    hookGetTokenProcess(args[1] as Class<*>)
+        classKmsMessageCenter?.hookMethod("register", String::class.java, Class::class.java, Boolean::class.java, Boolean::class.java) { chain ->
+            val uri = chain.getArg(0) as String
+            if (uri == "push.gettoken") {
+                // unhook self
+                chain.executable.let { executable ->
+                    one.yufz.xposed.XposedAPI.requireApi().hook(executable).intercept { c -> c.proceed() }
                 }
+                hookGetTokenProcess(chain.getArg(1) as Class<*>)
             }
+            chain.proceed()
         }
     }
 
@@ -39,18 +40,23 @@ object HookLegacyTokenRequest {
         val classIMessageEntity = classLoader.findClass("com.huawei.hms.support.api.transport.IMessageEntity")
         val classTokenResp = classLoader.findClass("com.huawei.hms.support.api.entity.push.TokenResp")
 
-        arrayOf(
-            *XposedHelpers.findMethodsByExactParameters(clazz.superclass, Void.TYPE, classIMessageEntity, Int::class.java),
-            *XposedHelpers.findMethodsByExactParameters(clazz.superclass, Void.TYPE, classIMessageEntity, Class::class.java, Int::class.java)
-        ).forEach { method ->
+        // Find methods by exact parameters using reflection
+        val methods = clazz.superclass.declaredMethods.filter { method ->
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.size == 2 &&
+            method.parameterTypes[0] == classIMessageEntity &&
+            method.parameterTypes[1] in listOf(Int::class.java, Class::class.java)
+        }
+
+        methods.forEach { method ->
             XLog.d(TAG, "hookGetTokenProcess() called with: method = $method")
 
-            method.hook {
-                doAfter {
-                    if (args[0].javaClass == classTokenResp) {
-                        mockReceive(thisObject, args[0])
-                    }
+            method.hook { chain ->
+                val result = chain.proceed()
+                if (chain.getArg(0).javaClass == classTokenResp) {
+                    mockReceive(chain.getThisObject(), chain.getArg(0))
                 }
+                result
             }
         }
     }
@@ -60,13 +66,19 @@ object HookLegacyTokenRequest {
 
         val context: Context = process["context"]
         val packageName = process.get<Any>("clientIdentity").callMethod("getPackageName") as String
-        val token: String = response["token"]
+        @Suppress("UNCHECKED_CAST")
+        val token = response.get<Any>("token")
         val intent = Intent(HMS_CORE_PUSH_ACTION_REGISTRATION)
         intent.setPackage(packageName)
-        intent.putExtra("device_token", token.toByteArray())
+        intent.putExtra("device_token", (token as? String)?.toByteArray() ?: token.toString().toByteArray())
 
         XLog.d(TAG, "mockReceive() called with: packageName = $packageName")
 
         context.sendBroadcast(intent)
+    }
+
+    private fun Class<*>.hookMethod(name: String, vararg paramTypes: Class<*>, interceptor: (io.github.libxposed.api.XposedInterface.Chain) -> Any?) {
+        val method = getDeclaredMethod(name, *paramTypes).apply { isAccessible = true }
+        one.yufz.xposed.XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
     }
 }

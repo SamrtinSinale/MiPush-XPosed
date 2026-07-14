@@ -1,15 +1,15 @@
 package one.yufz.hmspush.hook.hms.nm
 
-import android.app.*
-import android.os.Binder
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationChannelGroup
+import android.app.NotificationManager
+import android.content.Context
 import android.os.Build
 import android.service.notification.StatusBarNotification
-import com.huawei.android.app.NotificationManagerEx
-import de.robv.android.xposed.XposedHelpers
 import one.yufz.hmspush.common.ANDROID_PACKAGE_NAME
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.callMethod
-import one.yufz.xposed.callStaticMethod
 import one.yufz.xposed.setField
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.lang.reflect.InvocationTargetException
@@ -24,14 +24,30 @@ object SystemNotificationManager {
         }
     }
 
-    private val notificationManager: Any = NotificationManager::class.java.callStaticMethod("getService")!!
+    private val notificationManager: Any by lazy {
+        val nmClass = Class.forName("android.app.NotificationManager")
+        val getServiceMethod = nmClass.getDeclaredMethod("getService").apply { isAccessible = true }
+        getServiceMethod.invoke(null)!!
+    }
 
     private fun getUid(packageName: String): Int {
-        return AndroidAppHelper.currentApplication().packageManager.getPackageUid(packageName, 0)
+        val activityThreadClass = Class.forName("android.app.ActivityThread")
+        val currentApplication = activityThreadClass.getDeclaredMethod("currentApplication").apply { isAccessible = true }
+        val app = currentApplication.invoke(null) as Context
+        val pm = Context::class.java.getMethod("getPackageManager").apply { isAccessible = true }.invoke(app)
+        return pm.javaClass.getMethod("getPackageUid", String::class.java, Int::class.java).apply { isAccessible = true }
+            .invoke(pm, packageName, 0) as Int
     }
 
     private fun getUserId(): Int {
-        return AndroidAppHelper.currentApplication().callMethod("getUserId") as Int? ?: 0
+        val activityThreadClass = Class.forName("android.app.ActivityThread")
+        val currentApplication = activityThreadClass.getDeclaredMethod("currentApplication").apply { isAccessible = true }
+        val app = currentApplication.invoke(null) as Context
+        return try {
+            Context::class.java.getMethod("getUserId").apply { isAccessible = true }.invoke(app) as Int
+        } catch (_: NoSuchMethodException) {
+            0
+        }
     }
 
     fun notify(
@@ -40,10 +56,13 @@ object SystemNotificationManager {
     ) {
         XLog.d(TAG, "notify() called with: packageName = $packageName, tag = $tag, id = $id, notification = $notification")
 
-        //enqueueNotificationWithTag(String pkg, String opPkg, String tag, int id, Notification notification, int userId)
-        val methodEnqueueNotificationWithTag = XposedHelpers.findMethodExact(notificationManager.javaClass, "enqueueNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Notification::class.java, Int::class.java)
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "enqueueNotificationWithTag",
+            String::class.java, String::class.java, String::class.java,
+            Int::class.java, Notification::class.java, Int::class.java
+        ).apply { isAccessible = true }
         val opPkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ANDROID_PACKAGE_NAME else packageName
-        methodEnqueueNotificationWithTag.invoke(notificationManager, packageName, opPkg, tag, id, notification, getUserId())
+        method.invoke(notificationManager, packageName, opPkg, tag, id, notification, getUserId())
     }
 
     fun cancel(
@@ -53,13 +72,18 @@ object SystemNotificationManager {
         XLog.d(TAG, "cancel() called with: packageName = $packageName, tag = $tag, id = $id")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            //void cancelNotificationWithTag(String pkg, String opPkg, String tag, int id, int userId);
-            val methodCancelNotificationWithTag = XposedHelpers.findMethodExact(notificationManager.javaClass, "cancelNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Int::class.java)
-            methodCancelNotificationWithTag.invoke(notificationManager, packageName, ANDROID_PACKAGE_NAME, tag, id, getUserId())
+            val method = notificationManager.javaClass.getDeclaredMethod(
+                "cancelNotificationWithTag",
+                String::class.java, String::class.java, String::class.java,
+                Int::class.java, Int::class.java
+            ).apply { isAccessible = true }
+            method.invoke(notificationManager, packageName, ANDROID_PACKAGE_NAME, tag, id, getUserId())
         } else {
-            //  public void cancelNotificationWithTag(String pkg, String tag, int id, int userId)
-            val methodCancelNotificationWithTag = XposedHelpers.findMethodExact(notificationManager.javaClass, "cancelNotificationWithTag", String::class.java, String::class.java, Int::class.java, Int::class.java)
-            methodCancelNotificationWithTag.invoke(notificationManager, packageName, tag, id, getUserId())
+            val method = notificationManager.javaClass.getDeclaredMethod(
+                "cancelNotificationWithTag",
+                String::class.java, String::class.java, Int::class.java, Int::class.java
+            ).apply { isAccessible = true }
+            method.invoke(notificationManager, packageName, tag, id, getUserId())
         }
     }
 
@@ -69,24 +93,34 @@ object SystemNotificationManager {
     ) {
         XLog.d(TAG, "createNotificationChannels() called with: packageName = $packageName, channels = $channels")
 
-        val channelsList = XposedHelpers.findConstructorExact("android.content.pm.ParceledListSlice", null, List::class.java)
-            .newInstance(channels)
-        notificationManager.callMethod("createNotificationChannelsForPackage", packageName, getUid(packageName), channelsList)
+        val parceledListSliceClass = Class.forName("android.content.pm.ParceledListSlice")
+        val constructor = parceledListSliceClass.getDeclaredConstructor(List::class.java).apply { isAccessible = true }
+        val channelsList = constructor.newInstance(channels)
+
+        notificationManager.javaClass.getDeclaredMethod(
+            "createNotificationChannelsForPackage",
+            String::class.java, Int::class.java, parceledListSliceClass
+        ).apply { isAccessible = true }
+            .invoke(notificationManager, packageName, getUid(packageName), channelsList)
     }
 
     fun getNotificationChannel(
         packageName: String,
         channelId: String?
     ): NotificationChannel? {
-        XLog.d(TAG, "createNotificationChannels() called with: packageName = $packageName, channelId = $channelId")
+        XLog.d(TAG, "getNotificationChannel() called with: packageName = $packageName, channelId = $channelId")
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            //NotificationChannel getNotificationChannelForPackage(String pkg, int uid, String channelId, String conversationId, boolean includeDeleted);
-            XposedHelpers.findMethodExact(notificationManager.javaClass, "getNotificationChannelForPackage", String::class.java, Int::class.java, String::class.java, String::class.java, Boolean::class.java)
-                .invoke(notificationManager, packageName, getUid(packageName), channelId, null, false) as NotificationChannel?
+            val method = notificationManager.javaClass.getDeclaredMethod(
+                "getNotificationChannelForPackage",
+                String::class.java, Int::class.java, String::class.java, String::class.java, Boolean::class.java
+            ).apply { isAccessible = true }
+            method.invoke(notificationManager, packageName, getUid(packageName), channelId, null, false) as NotificationChannel?
         } else {
-            //NotificationChannel getNotificationChannelForPackage(String pkg, int uid, String channelId, boolean includeDeleted);
-            XposedHelpers.findMethodExact(notificationManager.javaClass, "getNotificationChannelForPackage", String::class.java, Int::class.java, String::class.java, Boolean::class.java)
-                .invoke(notificationManager, packageName, getUid(packageName), channelId, false) as NotificationChannel?
+            val method = notificationManager.javaClass.getDeclaredMethod(
+                "getNotificationChannelForPackage",
+                String::class.java, Int::class.java, String::class.java, Boolean::class.java
+            ).apply { isAccessible = true }
+            method.invoke(notificationManager, packageName, getUid(packageName), channelId, false) as NotificationChannel?
         }
     }
 
@@ -94,11 +128,15 @@ object SystemNotificationManager {
         packageName: String
     ): List<NotificationChannel?>? {
         XLog.d(TAG, "getNotificationChannels() called with: packageName = $packageName")
-        //ParceledListSlice getNotificationChannelsForPackage(String pkg, int uid, boolean includeDeleted);
-        val parceledListSlice = XposedHelpers.findMethodExact(notificationManager.javaClass, "getNotificationChannelsForPackage", String::class.java, Int::class.java, Boolean::class.java)
-                .invoke(notificationManager, packageName, getUid(packageName), false)
-        val list = parceledListSlice?.callMethod("getList") as List<NotificationChannel?>?
-        return list
+
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "getNotificationChannelsForPackage",
+            String::class.java, Int::class.java, Boolean::class.java
+        ).apply { isAccessible = true }
+        val parceledListSlice = method.invoke(notificationManager, packageName, getUid(packageName), false)
+        val list = parceledListSlice?.javaClass?.getDeclaredMethod("getList")?.apply { isAccessible = true }?.invoke(parceledListSlice)
+        @Suppress("UNCHECKED_CAST")
+        return list as? List<NotificationChannel?>?
     }
 
     fun deleteNotificationChannel(
@@ -106,9 +144,12 @@ object SystemNotificationManager {
         channelId: String
     ) {
         XLog.d(TAG, "deleteNotificationChannel() called with: packageName = $packageName, channelId = $channelId")
-        notificationManager.callMethod("deleteNotificationChannel", packageName, channelId)
-    }
 
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "deleteNotificationChannel", String::class.java, String::class.java
+        ).apply { isAccessible = true }
+        method.invoke(notificationManager, packageName, channelId)
+    }
 
     fun createNotificationChannelGroups(
         packageName: String,
@@ -116,30 +157,16 @@ object SystemNotificationManager {
     ) {
         XLog.d(TAG, "createNotificationChannelGroups() called with: packageName = $packageName, groups = $groups")
 
-        // 无法指定 uid，调用成功也不会生效
-        // void createNotificationChannelGroups(String pkg, in ParceledListSlice channelGroupList);
-        // val list = XposedHelpers.findConstructorExact("android.content.pm.ParceledListSlice", null, List::class.java)
-        //     .newInstance(groups)
-        // notificationManager.callMethod("createNotificationChannelGroups", packageName, list)
-
         groups.forEach {
             it.setField("mName", "Mi Push", String::class.java)
-
-            // 无法 hook
-            // void createNotificationChannelGroup(String pkg, int uid, NotificationChannelGroup group, boolean fromApp, boolean fromListener)
-            // notificationManager.callMethod("createNotificationChannelGroup", packageName, getUid(packageName), it, true, false)
             try {
-                // void updateNotificationChannelGroupForPackage(String pkg, int uid, in NotificationChannelGroup group);
-                // 因 createNotificationChannelGroup 的 fromApp 为 false，首次创建会产生 NullPointerException
-                notificationManager.callMethod(
+                notificationManager.javaClass.getDeclaredMethod(
                     "updateNotificationChannelGroupForPackage",
-                    packageName,
-                    getUid(packageName),
-                    it
-                )
+                    String::class.java, Int::class.java, NotificationChannelGroup::class.java
+                ).apply { isAccessible = true }
+                    .invoke(notificationManager, packageName, getUid(packageName), it)
             } catch (e: Throwable) {
-                // ignore
-                // Attempt to invoke virtual method 'boolean android.app.NotificationChannelGroup.isBlocked()' on a null object reference
+                // ignore - Attempt to invoke virtual method 'boolean android.app.NotificationChannelGroup.isBlocked()' on a null object reference
             }
         }
     }
@@ -149,8 +176,12 @@ object SystemNotificationManager {
         groupId: String
     ): NotificationChannelGroup? {
         XLog.d(TAG, "getNotificationChannelGroup() called with: packageName = $packageName, groupId = $groupId")
-        //NotificationChannelGroup getNotificationChannelGroupForPackage(String groupId, String pkg, int uid);
-        return notificationManager.callMethod("getNotificationChannelGroupForPackage", groupId, packageName, getUid(packageName)) as NotificationChannelGroup?
+
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "getNotificationChannelGroupForPackage",
+            String::class.java, String::class.java, Int::class.java
+        ).apply { isAccessible = true }
+        return method.invoke(notificationManager, groupId, packageName, getUid(packageName)) as? NotificationChannelGroup?
     }
 
     fun getNotificationChannelGroups(
@@ -158,11 +189,14 @@ object SystemNotificationManager {
     ): List<NotificationChannelGroup?>? {
         XLog.d(TAG, "getNotificationChannelGroups() called with: packageName = $packageName")
 
-        //ParceledListSlice getNotificationChannelGroupsForPackage(String pkg, int uid, boolean includeDeleted);
-        val parceledListSlice = XposedHelpers.findMethodExact(notificationManager.javaClass, "getNotificationChannelGroupsForPackage", String::class.java, Int::class.java, Boolean::class.java)
-            .invoke(notificationManager, packageName, getUid(packageName), false)
-        val list = parceledListSlice?.callMethod("getList") as List<NotificationChannelGroup?>?
-        return list
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "getNotificationChannelGroupsForPackage",
+            String::class.java, Int::class.java, Boolean::class.java
+        ).apply { isAccessible = true }
+        val parceledListSlice = method.invoke(notificationManager, packageName, getUid(packageName), false)
+        val list = parceledListSlice?.javaClass?.getDeclaredMethod("getList")?.apply { isAccessible = true }?.invoke(parceledListSlice)
+        @Suppress("UNCHECKED_CAST")
+        return list as? List<NotificationChannelGroup?>?
     }
 
     fun deleteNotificationChannelGroup(
@@ -170,24 +204,35 @@ object SystemNotificationManager {
         groupId: String
     ) {
         XLog.d(TAG, "deleteNotificationChannelGroup() called with: packageName = $packageName, groupId = $groupId")
-        //void deleteNotificationChannelGroup(String pkg, String channelGroupId);
-        notificationManager.callMethod("deleteNotificationChannelGroup", packageName, groupId)
+
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "deleteNotificationChannelGroup", String::class.java, String::class.java
+        ).apply { isAccessible = true }
+        method.invoke(notificationManager, packageName, groupId)
     }
 
     fun areNotificationsEnabled(
         packageName: String
     ): Boolean {
         XLog.d(TAG, "areNotificationsEnabled() called with: packageName = $packageName")
-        return notificationManager.callMethod("areNotificationsEnabledForPackage", packageName, getUid(packageName)) as Boolean
+
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "areNotificationsEnabledForPackage", String::class.java, Int::class.java
+        ).apply { isAccessible = true }
+        return method.invoke(notificationManager, packageName, getUid(packageName)) as Boolean
     }
 
     fun getActiveNotifications(
         packageName: String
     ): Array<StatusBarNotification?>? {
         XLog.d(TAG, "getActiveNotifications() called with: packageName = $packageName")
-        val parceledListSlice = notificationManager.callMethod("getAppActiveNotifications", packageName, getUserId())
-        val list = parceledListSlice?.callMethod("getList") as List<StatusBarNotification>
-        return list.toTypedArray()
-    }
 
+        val method = notificationManager.javaClass.getDeclaredMethod(
+            "getAppActiveNotifications", String::class.java, Int::class.java
+        ).apply { isAccessible = true }
+        val parceledListSlice = method.invoke(notificationManager, packageName, getUserId())
+        val list = parceledListSlice?.javaClass?.getDeclaredMethod("getList")?.apply { isAccessible = true }?.invoke(parceledListSlice)
+        @Suppress("UNCHECKED_CAST")
+        return (list as? List<StatusBarNotification>)?.toTypedArray()
+    }
 }

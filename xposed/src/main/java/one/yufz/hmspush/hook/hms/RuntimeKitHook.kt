@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Handler
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.findClass
-import one.yufz.xposed.hookMethod
 import java.util.*
 
 object RuntimeKitHook {
@@ -18,18 +17,18 @@ object RuntimeKitHook {
 
     fun hook(classLoader: ClassLoader) {
         classLoader.findClass("com.huawei.hms.runtimekit.container.kitsdk.KitContext")
-            .hookMethod("registerReceiver", BroadcastReceiver::class.java, IntentFilter::class.java, String::class.java, Handler::class.java) {
-                doAfter {
-                    val receiver = args[0] as BroadcastReceiver
-                    val intentFilter = args[1] as IntentFilter
-                    if (intentFilter.hasAction("android.intent.action.PACKAGE_REMOVED")
-                        && intentFilter.hasAction("android.intent.action.PACKAGE_DATA_CLEARED")
-                        && intentFilter.hasDataScheme("package")
-                    ) {
-                        receivers[receiver] = thisObject as Context
-                        XLog.d(TAG, "receiver added: $receiver")
-                    }
+            .hookMethod("registerReceiver", BroadcastReceiver::class.java, IntentFilter::class.java, String::class.java, Handler::class.java) { chain ->
+                val result = chain.proceed()
+                val receiver = chain.getArg(0) as BroadcastReceiver
+                val intentFilter = chain.getArg(1) as IntentFilter
+                if (intentFilter.hasAction("android.intent.action.PACKAGE_REMOVED")
+                    && intentFilter.hasAction("android.intent.action.PACKAGE_DATA_CLEARED")
+                    && intentFilter.hasDataScheme("package")
+                ) {
+                    receivers[receiver] = chain.getThisObject() as Context
+                    XLog.d(TAG, "receiver added: $receiver")
                 }
+                result
             }
     }
 
@@ -41,10 +40,13 @@ object RuntimeKitHook {
         }
 
         receivers.forEach { (receiver, context) ->
-
             receiver.onReceive(context, intent)
-
             XLog.d(TAG, "sendFakePackageRemoveBroadcast() send to: $receiver")
         }
+    }
+
+    private fun Class<*>.hookMethod(name: String, vararg paramTypes: Class<*>, interceptor: (io.github.libxposed.api.XposedInterface.Chain) -> Any?) {
+        val method = getDeclaredMethod(name, *paramTypes).apply { isAccessible = true }
+        one.yufz.xposed.XposedAPI.requireApi().hook(method).intercept { chain -> interceptor(chain) }
     }
 }

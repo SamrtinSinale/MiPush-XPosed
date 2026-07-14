@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号 (留空自动从 git 获取)'
+        description: 版本号 留空自动获取
         required: false
         default: ''
 
@@ -45,20 +45,23 @@ jobs:
       - name: Get version
         id: version
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+          VER="${{ github.event.inputs.version }}"
+          if [ -n "$VER" ]; then
+            echo "name=$VER" >> $GITHUB_OUTPUT
+            echo "tag=$VER" >> $GITHUB_OUTPUT
           elif [ "${{ github.ref_type }}" = "tag" ]; then
-            VERSION="${{ github.ref_name }}"
+            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
-            VERSION="$(git describe --tags --exclude 'v*-*' 2>/dev/null || echo '0.0.0')"
+            DESCRIBE="$(git describe --tags --exclude 'v*-*' 2>/dev/null || echo '0.0.0')"
+            echo "name=$DESCRIBE" >> $GITHUB_OUTPUT
+            echo "tag=$DESCRIBE" >> $GITHUB_OUTPUT
           fi
-          echo "name=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build & Sign APK
+      - name: Build and Sign APK
         run: |
           cat > local.properties << EOF
-STORE_FILE_PATH=${{ github.workspace }}/release.keystore
+STORE_FILE_PATH=${PWD}/release.keystore
 STORE_PASSWORD=android
 KEY_ALIAS=release
 KEY_PASSWORD=android

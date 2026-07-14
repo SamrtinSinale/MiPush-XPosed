@@ -60,12 +60,10 @@ jobs:
 
       - name: Build and Sign APK
         run: |
-          cat > local.properties << EOF
-STORE_FILE_PATH=${PWD}/release.keystore
-STORE_PASSWORD=android
-KEY_ALIAS=release
-KEY_PASSWORD=android
-EOF
+          echo "STORE_FILE_PATH=${PWD}/release.keystore" > local.properties
+          echo "STORE_PASSWORD=android" >> local.properties
+          echo "KEY_ALIAS=release" >> local.properties
+          echo "KEY_PASSWORD=android" >> local.properties
           ./gradlew :app:assembleRelease -PversionName=${{ steps.version.outputs.name }}
 
       - name: Upload to Release

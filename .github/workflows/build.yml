@@ -30,26 +30,25 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build APK
-        run: ./gradlew :app:assembleRelease
-
-      - name: Set release info
-        id: info
+      - name: Get version name from git
+        id: version
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            VERSION="${{ github.ref_name }}"
           else
-            TAG="build-$(date +'%Y%m%d-%H%M%S')"
-            echo "tag=$TAG" >> $GITHUB_OUTPUT
-            echo "name=$TAG" >> $GITHUB_OUTPUT
+            VERSION="$(git describe --tags --exclude 'v*-*' 2>/dev/null || echo '0.0.0')"
           fi
+          echo "name=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create Release
+      - name: Build APK
+        run: ./gradlew :app:assembleRelease -PversionName=${{ steps.version.outputs.name }}
+
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.info.outputs.name }}
-          tag_name: ${{ steps.info.outputs.tag }}
-          files: app/build/outputs/apk/release/app-release.apk
+          name: ${{ steps.version.outputs.name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: app/build/outputs/apk/release/*.apk
           generate_release_notes: true
           make_latest: true

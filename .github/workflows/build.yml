@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (留空自动从 git 获取)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -30,10 +35,12 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Get version name from git
+      - name: Get version
         id: version
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${{ github.ref_name }}"
           else
             VERSION="$(git describe --tags --exclude 'v*-*' 2>/dev/null || echo '0.0.0')"

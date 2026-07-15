@@ -2,17 +2,16 @@ package one.yufz.hmspush.hook.hms
 
 import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.findClassOrNull
-import one.yufz.xposed.findMethodOrNull
 
 /**
  * Hook BackgroundActivityStartEnabler in MI Push to suppress
  * the "initializing" status notification during XMPushService startup.
  * 
- * On HyperOS/Android 14+, posting a notification during service creation
- * throws SecurityException and causes XMPushService to crash + restart,
+ * On HyperOS/Android 14+, posting/canceling a notification during service
+ * creation throws SecurityException and causes XMPushService to crash,
  * delaying push connection by several seconds.
  * 
- * This hook intercepts notifyPushStatusInitializing() and does nothing,
+ * This hook intercepts initialize() and returns immediately,
  * eliminating the delay without affecting any other functionality.
  */
 object HookBackgroundActivityStart {
@@ -24,10 +23,10 @@ object HookBackgroundActivityStart {
                 "com.xiaomi.push.service.BackgroundActivityStartEnabler"
             ) ?: return
 
-            val method = clazz.getDeclaredMethod("notifyPushStatusInitializing").apply { isAccessible = true }
+            val method = clazz.getDeclaredMethod("initialize").apply { isAccessible = true }
 
-            one.yufz.xposed.XposedAPI.requireApi().hook(method).intercept { _ ->
-                XLog.d(TAG, "suppressed notifyPushStatusInitializing to prevent XMPushService crash")
+            one.yufz.xposed.XposedAPI.requireApi().hook(method).intercept { chain ->
+                XLog.d(TAG, "suppressed BackgroundActivityStartEnabler.initialize() to prevent XMPushService crash")
                 null
             }
 

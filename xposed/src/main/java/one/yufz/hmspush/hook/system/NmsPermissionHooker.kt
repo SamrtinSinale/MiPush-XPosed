@@ -139,8 +139,7 @@ object NmsPermissionHooker {
     }
 
     private fun doHookPermission(chain: io.github.libxposed.api.XposedInterface.Chain, targetPkgIndex: Int, hookExtra: (() -> Unit)?): Any? {
-        val pkg = chain.getArg(targetPkgIndex) as? String
-        if (pkg != null && pkg != HMS_PACKAGE_NAME && fromHms()) {
+        if (fromHms()) {
             Binder.clearCallingIdentity()
             hookExtra?.invoke()
             return chain.proceed()

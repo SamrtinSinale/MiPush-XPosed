@@ -69,7 +69,7 @@ object NmsPermissionHooker {
             findMethodExact(classINotificationManager, "cancelNotificationWithTag", String::class.java, String::class.java, String::class.java, Int::class.java, Int::class.java)
                 ?.hook { chain ->
                     val pkg = chain.getArg(0) as String
-                    if (fromHms()) {
+                    if (fromHms() && pkg != HMS_PACKAGE_NAME) {
                         Binder.clearCallingIdentity()
                         val newArgs = chain.args.toMutableList()
                         newArgs[1] = ANDROID_PACKAGE_NAME

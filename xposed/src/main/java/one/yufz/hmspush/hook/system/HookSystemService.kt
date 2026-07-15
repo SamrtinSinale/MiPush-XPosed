@@ -22,12 +22,14 @@ class HookSystemService {
             val result = chain.proceed()
             XLog.d(TAG, "onStart invoked")
             val nmsClass = chain.getThisObject().javaClass
-            @Suppress("UNUSED_VARIABLE")
-            val context = findMethod(nmsClass, "getContext").invoke(chain.getThisObject()) as Context
-            val mServiceField = findField(nmsClass, "mService")
-            val stubClass = mServiceField.get(chain.getThisObject())!!.javaClass
-            hookPermission(stubClass)
-            hookSystemReadyFlag(stubClass)
+            try {
+                val mServiceField = findField(nmsClass, "mService")
+                val stubClass = mServiceField.get(chain.getThisObject())!!.javaClass
+                hookPermission(stubClass)
+                hookSystemReadyFlag(stubClass)
+            } catch (t: Throwable) {
+                XLog.e(TAG, "onStart hook error", t)
+            }
             result
         }
 
